@@ -249,6 +249,54 @@ class OrbitTest(unittest.TestCase):
             core.write_ical(p0, dest, self.SECRET)
         self.assertEqual(dest.read_bytes(), b"keep me")
 
+    # ----- snooze (v0.2) -----------------------------------------------
+    def test_snooze_defers_the_due_date(self):
+        p0 = self.orbit()
+        p1 = self._seq(); tid = core.add_track(p0, p1, self.SECRET, "Rotate", 7)["track_id"]
+        p2 = self._seq(); core.log(p1, p2, self.SECRET, tid, done_utc=when(self.base, 0))
+        # Day 9: naturally overdue (cadence 7, logged day 0).
+        self.assertIn(core.status(p2, self.SECRET, now=when(self.base, 9))["tracks"][0]["state"],
+                      ("due", "overdue"))
+        p3 = self._seq(); res = core.snooze(p2, p3, self.SECRET, tid, until=when(self.base, 20))
+        self.assertTrue(res["snoozed_until"])
+        row = core.status(p3, self.SECRET, now=when(self.base, 9))["tracks"][0]
+        self.assertTrue(row["snoozed"])
+        self.assertNotIn(row["state"], ("due", "overdue"))
+        self.assertTrue(row["next_due_utc"].startswith("2026-01-21"))
+
+    def test_snooze_never_pulls_due_earlier(self):
+        p0 = self.orbit()
+        p1 = self._seq(); tid = core.add_track(p0, p1, self.SECRET, "Audit", 30)["track_id"]
+        p2 = self._seq(); core.log(p1, p2, self.SECRET, tid, done_utc=when(self.base, 0))
+        # Snoozing to day 5 (before the natural day-30 due) has no effect.
+        p3 = self._seq(); core.snooze(p2, p3, self.SECRET, tid, until=when(self.base, 5))
+        row = core.status(p3, self.SECRET, now=when(self.base, 2))["tracks"][0]
+        self.assertFalse(row["snoozed"])
+        self.assertTrue(row["next_due_utc"].startswith("2026-01-31"))
+
+    def test_snooze_days_then_clear(self):
+        p0 = self.orbit()
+        p1 = self._seq(); tid = core.add_track(p0, p1, self.SECRET, "Backup", 7)["track_id"]
+        p2 = self._seq(); core.snooze(p1, p2, self.SECRET, tid, days=10)
+        self.assertIsNotNone(core._load(p2, self.SECRET)[0]["tracks"][0]["snoozed_until"])
+        p3 = self._seq(); core.snooze(p2, p3, self.SECRET, tid)   # clear
+        self.assertIsNone(core._load(p3, self.SECRET)[0]["tracks"][0]["snoozed_until"])
+
+    def test_snooze_rejects_unknown_track(self):
+        p0 = self.orbit()
+        with self.assertRaises(OrbitError):
+            core.snooze(p0, self._seq(), self.SECRET, "11111111-1111-1111-1111-111111111111", days=3)
+
+    def test_pre_snooze_orbit_migrates_on_load(self):
+        p0 = self.orbit()
+        p1 = self._seq(); core.add_track(p0, p1, self.SECRET, "x", 7)
+        data, _ = core._load(p1, self.SECRET)
+        del data["tracks"][0]["snoozed_until"]               # simulate a pre-v0.2 track
+        legacy = self.dir / "legacy.envyorbit"
+        core.new_file(legacy, core.encrypt_bytes(core._canonical(data), self.SECRET))
+        reloaded, _ = core._load(legacy, self.SECRET)        # must not raise
+        self.assertIsNone(reloaded["tracks"][0]["snoozed_until"])
+
 
 if __name__ == "__main__":
     unittest.main()

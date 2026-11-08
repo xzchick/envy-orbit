@@ -14,7 +14,7 @@ import sys
 
 from . import __version__
 from .core import (DEFAULT_LOOKAHEAD, OrbitError, add_track, check_passphrase, create,
-                   export, inspect, log, remove_track, status, write_ical)
+                   export, inspect, log, remove_track, snooze, status, write_ical)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +49,15 @@ def build_parser() -> argparse.ArgumentParser:
     rm.add_argument("orbit")
     rm.add_argument("destination", help="a new orbit file; never overwritten")
     rm.add_argument("--track", required=True)
+
+    sn = commands.add_parser("snooze", help="defer a track's next due date (writes a new revision)")
+    sn.add_argument("orbit")
+    sn.add_argument("destination", help="a new orbit file; never overwritten")
+    sn.add_argument("--track", required=True)
+    when = sn.add_mutually_exclusive_group(required=True)
+    when.add_argument("--days", type=int, metavar="N", help="snooze for N days from now")
+    when.add_argument("--until", metavar="UTC", help="snooze until an ISO 8601 UTC time")
+    when.add_argument("--clear", action="store_true", help="clear any snooze on the track")
 
     st = commands.add_parser("status", help="show what is due (read-only; exit 1 if anything needs attention)")
     st.add_argument("orbit")
@@ -97,6 +106,12 @@ def _run(args) -> int:
         result = remove_track(args.orbit, args.destination, _passphrase(), args.track)
         print(f"removed {result['removed_track']} → {result['output']} (revision {result['revision']})")
         return 0
+    if args.command == "snooze":
+        result = snooze(args.orbit, args.destination, _passphrase(), args.track,
+                        until=None if args.clear else args.until, days=None if args.clear else args.days)
+        where = result["snoozed_until"] or "cleared"
+        print(f"snoozed {result['snoozed_track']} → {where} → {result['output']} (revision {result['revision']})")
+        return 0
     if args.command == "status":
         report = status(args.orbit, _passphrase(), lookahead=args.lookahead)
         counts = report["counts"]
@@ -104,7 +119,8 @@ def _run(args) -> int:
             due = "never logged" if row["state"] == "pending" else (
                 f"{-row['days']}d overdue" if row["days"] is not None and row["days"] < 0
                 else f"in {row['days']}d" if row["days"] is not None else "—")
-            print(f"  [{row['state']:>8}] {row['title']}  (every {row['cadence_days']}d, {due})")
+            tag = " · snoozed" if row.get("snoozed") else ""
+            print(f"  [{row['state']:>8}] {row['title']}  (every {row['cadence_days']}d, {due}{tag})")
         print(f"overdue {counts['overdue']}, due {counts['due']}, pending {counts['pending']}, "
               f"soon {counts['soon']}, on-track {counts['on-track']}")
         print("ALL CLEAR" if report["all_clear"] else f"{report['needs_attention']} track(s) need attention")
