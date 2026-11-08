@@ -14,7 +14,7 @@ import sys
 
 from . import __version__
 from .core import (DEFAULT_LOOKAHEAD, OrbitError, add_track, check_passphrase, create,
-                   export, inspect, log, remove_track, status)
+                   export, inspect, log, remove_track, status, write_ical)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     exp.add_argument("destination", help="a new report file; never overwritten")
     exp.add_argument("--format", default="html", choices=("html", "json"))
     exp.add_argument("--lookahead", type=int, default=DEFAULT_LOOKAHEAD, metavar="DAYS")
+
+    ic = commands.add_parser("ical", help="write each track's next due date to an iCal (.ics) file")
+    ic.add_argument("orbit")
+    ic.add_argument("destination", help="a new .ics file; never overwritten")
+    ic.add_argument("--lookahead", type=int, default=DEFAULT_LOOKAHEAD, metavar="DAYS")
     return root
 
 
@@ -107,6 +112,10 @@ def _run(args) -> int:
     if args.command == "export":
         result = export(args.orbit, args.destination, _passphrase(), args.format, lookahead=args.lookahead)
         print(f"export ({result['format']}): wrote {result['output']}  sha256 {result['sha256']}")
+        return 0
+    if args.command == "ical":
+        result = write_ical(args.orbit, args.destination, _passphrase(), lookahead=args.lookahead)
+        print(f"ical: wrote {result['events']} event(s) → {result['output']}  sha256 {result['sha256']}")
         return 0
     if args.command == "inspect":
         print(json.dumps(inspect(args.orbit, _passphrase()), indent=2, ensure_ascii=False))
