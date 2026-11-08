@@ -435,3 +435,41 @@ def export(source, destination, secret, format="html", now=None, lookahead=DEFAU
     return {"output": str(destination), "format": format, "plaintext": True,
             "sha256": hashlib.sha256(output).hexdigest(),
             "all_clear": report["all_clear"], "needs_attention": report["needs_attention"]}
+
+
+# --- iCal (.ics) export ------------------------------------------------------
+# Each track's computed next-due date becomes a single timed VEVENT, so a
+# calendar can remind you. Pending (never-logged) tracks have no due date and
+# are skipped. The file is plaintext, like the HTML/JSON export.
+
+def _ics_escape(text):
+    return str(text).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def _ics_dt(iso):
+    return _parse_utc(iso).astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def ical(source, secret, now=None, lookahead=DEFAULT_LOOKAHEAD):
+    """Render each track's next due date as an iCal VEVENT. Read-only."""
+    report = status(source, secret, now, lookahead)
+    stamp = _ics_dt(report["evaluated_utc"])
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ENVY//Orbit//EN", "CALSCALE:GREGORIAN"]
+    for r in report["tracks"]:
+        if not r["next_due_utc"]:
+            continue
+        lines.extend([
+            "BEGIN:VEVENT", f"UID:{r['id']}@envy-orbit", f"DTSTAMP:{stamp}",
+            f"DTSTART:{_ics_dt(r['next_due_utc'])}",
+            f"SUMMARY:{_ics_escape(r['title'])} (every {r['cadence_days']}d)",
+            f"DESCRIPTION:{_ics_escape(r['state'] + ' · last done ' + (r['last_done_utc'] or 'never'))}",
+            "END:VEVENT"])
+    lines.append("END:VCALENDAR")
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
+def write_ical(source, destination, secret, now=None, lookahead=DEFAULT_LOOKAHEAD):
+    output = ical(source, secret, now, lookahead)
+    new_file(destination, output)
+    return {"output": str(destination), "events": output.count(b"BEGIN:VEVENT"),
+            "sha256": hashlib.sha256(output).hexdigest()}

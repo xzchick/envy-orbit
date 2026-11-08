@@ -216,6 +216,39 @@ class OrbitTest(unittest.TestCase):
             core.add_track(p0, dest, self.SECRET, "x", 30)
         self.assertEqual(dest.read_bytes(), b"keep me")
 
+    # ----- iCal export --------------------------------------------------
+    def test_ical_export_writes_due_dates(self):
+        p0 = self.orbit(title="Maintenance")
+        p1 = self._seq()
+        tid = core.add_track(p0, p1, self.SECRET, "Rotate key", 30)["track_id"]
+        p2 = self._seq()
+        core.log(p1, p2, self.SECRET, tid, done_utc=when(self.base, 0))
+        # Evaluate a week later: next due is 2026-01-31.
+        out = self.dir / "orbit.ics"
+        result = core.write_ical(p2, out, self.SECRET, now=when(self.base, 7))
+        text = out.read_bytes().decode("utf-8")  # keep CRLF; read_text() would normalize it
+        self.assertEqual(result["events"], 1)
+        self.assertTrue(text.startswith("BEGIN:VCALENDAR\r\n"))
+        self.assertIn("DTSTART:20260131T000000Z", text)
+        self.assertIn("SUMMARY:Rotate key (every 30d)", text)
+        self.assertTrue(text.rstrip().endswith("END:VCALENDAR"))
+
+    def test_ical_skips_tracks_never_logged(self):
+        p0 = self.orbit()
+        p1 = self._seq()
+        core.add_track(p0, p1, self.SECRET, "Never done", 30)  # pending, no due date
+        out = self.dir / "empty.ics"
+        result = core.write_ical(p1, out, self.SECRET)
+        self.assertEqual(result["events"], 0)
+        self.assertNotIn("BEGIN:VEVENT", out.read_text())
+
+    def test_ical_refuses_to_overwrite(self):
+        p0 = self.orbit()
+        dest = self.dir / "exists.ics"; dest.write_bytes(b"keep me")
+        with self.assertRaises(OrbitError):
+            core.write_ical(p0, dest, self.SECRET)
+        self.assertEqual(dest.read_bytes(), b"keep me")
+
 
 if __name__ == "__main__":
     unittest.main()
