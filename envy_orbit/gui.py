@@ -191,6 +191,7 @@ def _build():
                                            ("Lock", self.lock, "pick"),
                                            ("Add track", self.add_track, "go"),
                                            ("Log done", self.log_done, "go"),
+                                           ("Copy id", self.copy_track_id, "pick"),
                                            ("Remove track", self.remove_track, "pick"),
                                            ("Export report", self.export_report, "pick")):
                 b = QPushButton(caption); b.setObjectName(name)
@@ -336,6 +337,16 @@ def _build():
                 self._warn(str(exc)); return
             self._reopen(dest)
             self.views.setCurrentIndex(0)
+
+        def copy_track_id(self):
+            if not self.data:
+                return
+            track_id, label = self._selected_track()
+            if not track_id:
+                self._warn("Select a track in the Orbit or Tracks tab first."); return
+            QApplication.clipboard().setText(track_id)
+            self._warn(f"Copied the id for “{label}” to the clipboard:\n{track_id}",
+                       icon=QMessageBox.Icon.Information, title="Track id copied")
 
         def remove_track(self):
             if not self.data:
