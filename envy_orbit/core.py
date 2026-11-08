@@ -159,13 +159,18 @@ def _int_in(value, low, high, field):
 # --- Track and journal validation --------------------------------------------
 
 def _validate_track(value):
-    if not isinstance(value, dict) or set(value) != {"id", "title", "cadence_days", "grace_days", "created_utc"}:
+    if not isinstance(value, dict) or set(value) != {"id", "title", "cadence_days", "grace_days",
+                                                     "created_utc", "snoozed_until"}:
         raise OrbitError("Invalid track")
+    snoozed = value["snoozed_until"]
+    if snoozed is not None:
+        snoozed = _timestamp(snoozed, "snoozed_until")
     return {"id": _uuid(value["id"], "track id"),
             "title": _text(value["title"], "track title", 200),
             "cadence_days": _int_in(value["cadence_days"], MIN_CADENCE, MAX_CADENCE, "Cadence"),
             "grace_days": _int_in(value["grace_days"], 0, MAX_GRACE, "Grace"),
-            "created_utc": _timestamp(value["created_utc"], "created_utc")}
+            "created_utc": _timestamp(value["created_utc"], "created_utc"),
+            "snoozed_until": snoozed}
 
 
 def _validate_record(value):
@@ -235,13 +240,23 @@ def _validate_orbit(data):
 
 # --- Load / write ------------------------------------------------------------
 
+def _migrate(data):
+    """Bring an older orbit forward in memory. Tracks gained `snoozed_until` in v0.2;
+    tracks that predate it get None. The journal is unaffected."""
+    if isinstance(data, dict) and isinstance(data.get("tracks"), list):
+        for track in data["tracks"]:
+            if isinstance(track, dict) and "snoozed_until" not in track:
+                track["snoozed_until"] = None
+    return data
+
+
 def _load(source, secret):
     encrypted = read_regular(source, MAX_ENVELOPE)
     try:
         data = json.loads(decrypt_bytes(encrypted, secret))
     except (json.JSONDecodeError, UnicodeError, RecursionError):
         raise OrbitError("Encrypted orbit does not contain valid JSON") from None
-    return _validate_orbit(data), hashlib.sha256(encrypted).hexdigest()
+    return _validate_orbit(_migrate(data)), hashlib.sha256(encrypted).hexdigest()
 
 
 def _write(destination, data, secret):
@@ -275,7 +290,7 @@ def add_track(source, destination, secret, title, cadence_days, grace_days=0):
         raise OrbitError(f"An orbit holds at most {MAX_TRACKS} tracks")
     track = _validate_track({"id": str(uuid.uuid4()), "title": title,
                              "cadence_days": cadence_days, "grace_days": grace_days,
-                             "created_utc": _utc()})
+                             "created_utc": _utc(), "snoozed_until": None})
     data["tracks"] = sorted(data["tracks"] + [track], key=lambda t: t["id"])
     result = _save_revision(data, envelope, destination, secret)
     return dict(result, track_id=track["id"])
@@ -290,6 +305,30 @@ def remove_track(source, destination, secret, track_id):
     data["tracks"] = kept   # the journal is append-only; past completions are preserved
     result = _save_revision(data, envelope, destination, secret)
     return dict(result, removed_track=track_id)
+
+
+def snooze(source, destination, secret, track_id, until=None, days=None):
+    """Defer a track's next due date, or clear a snooze (both `until` and `days` None).
+
+    A snooze never pulls a due date earlier; it only pushes it out, and it expires
+    on its own once the date passes. Writes a new, preserved revision.
+    """
+    data, envelope = _load(source, secret)
+    track_id = _uuid(track_id, "track id")
+    track = next((t for t in data["tracks"] if t["id"] == track_id), None)
+    if track is None:
+        raise OrbitError("No such track in this orbit")
+    if until is None and days is None:
+        track["snoozed_until"] = None
+    elif days is not None:
+        _int_in(days, 1, MAX_CADENCE, "Snooze days")
+        when = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)
+        track["snoozed_until"] = when.isoformat()
+    else:
+        track["snoozed_until"] = _timestamp(until, "snoozed_until")
+    _validate_track(track)
+    result = _save_revision(data, envelope, destination, secret)
+    return dict(result, snoozed_track=track_id, snoozed_until=track["snoozed_until"])
 
 
 def log(source, destination, secret, track_id, done_utc=None, note=""):
@@ -321,8 +360,14 @@ def _classify(track, last_done, now, lookahead):
     grace = datetime.timedelta(days=track["grace_days"])
     soon = datetime.timedelta(days=lookahead)
     if last_done is None:
-        return {"state": "pending", "next_due_utc": None, "days": None}
+        return {"state": "pending", "next_due_utc": None, "days": None, "snoozed": False}
     next_due = _parse_utc(last_done) + cadence
+    # A live snooze defers the next due date forward (never earlier).
+    snoozed = False
+    if track.get("snoozed_until"):
+        until = _parse_utc(track["snoozed_until"])
+        if until > now and until > next_due:
+            next_due, snoozed = until, True
     # Whole days until due (truncated toward zero so a track 1 day overdue reads
     # "1d overdue", not "2d" from timedelta.days flooring). Negative once past due.
     days = int((next_due - now).total_seconds() // 86400) if next_due >= now \
@@ -335,7 +380,7 @@ def _classify(track, last_done, now, lookahead):
         state = "soon"
     else:
         state = "on-track"
-    return {"state": state, "next_due_utc": next_due.isoformat(), "days": days}
+    return {"state": state, "next_due_utc": next_due.isoformat(), "days": days, "snoozed": snoozed}
 
 
 # The order a status board should present tracks: the most urgent first.
@@ -355,7 +400,7 @@ def status(source, secret, now=None, lookahead=DEFAULT_LOOKAHEAD):
         counts[verdict["state"]] += 1
         rows.append({"id": track["id"], "title": track["title"], "cadence_days": track["cadence_days"],
                      "grace_days": track["grace_days"], "last_done_utc": last, "completions": completions,
-                     **verdict})
+                     "snoozed_until": track["snoozed_until"], **verdict})
     rows.sort(key=lambda r: (_ORDER[r["state"]], r["days"] if r["days"] is not None else -(10 ** 9), r["title"]))
     attention = counts["overdue"] + counts["due"] + counts["pending"]
     return {"orbit_id": data["orbit_id"], "title": data["title"], "revision": data["revision"],
