@@ -298,5 +298,21 @@ class OrbitTest(unittest.TestCase):
         self.assertIsNone(reloaded["tracks"][0]["snoozed_until"])
 
 
+    # ----- CSV export (v0.2) -------------------------------------------
+    def test_export_csv_status(self):
+        import csv as _csv
+        p0 = self.orbit()
+        p1 = self._seq(); tid = core.add_track(p0, p1, self.SECRET, "Rotate", 30)["track_id"]
+        p2 = self._seq(); core.log(p1, p2, self.SECRET, tid, done_utc=when(self.base, 0))
+        out = self.dir / "s.csv"
+        res = core.export(p2, out, self.SECRET, "csv", now=when(self.base, 5))
+        self.assertEqual(res["format"], "csv")
+        rows = list(_csv.reader(out.read_text().splitlines()))
+        self.assertEqual(rows[0][:3], ["state", "track", "cadence_days"])
+        self.assertEqual(len(rows) - 1, 1)
+        self.assertEqual(rows[1][1], "Rotate")
+        self.assertEqual(rows[1][2], "30")
+
+
 if __name__ == "__main__":
     unittest.main()

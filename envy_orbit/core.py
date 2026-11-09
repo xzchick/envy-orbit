@@ -21,9 +21,11 @@ Standard library only, apart from ``cryptography`` for the encrypted envelope.
 
 from __future__ import annotations
 
+import csv
 import datetime
 import hashlib
 import html
+import io
 import json
 import os
 import stat
@@ -424,9 +426,15 @@ def inspect(source, secret):
 
 # --- Plaintext export --------------------------------------------------------
 
+def _safe_csv(value):
+    """Guard a CSV field against spreadsheet formula injection."""
+    text = str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
+
 def export(source, destination, secret, format="html", now=None, lookahead=DEFAULT_LOOKAHEAD):
-    if format not in ("html", "json"):
-        raise OrbitError("Export format must be html or json")
+    if format not in ("html", "json", "csv"):
+        raise OrbitError("Export format must be html, json or csv")
     data, envelope = _load(source, secret)
     report = status(source, secret, now, lookahead)
     out = {"orbit": {"orbit_id": data["orbit_id"], "title": data["title"], "revision": data["revision"],
@@ -439,6 +447,17 @@ def export(source, destination, secret, format="html", now=None, lookahead=DEFAU
                           "the operator's clock."}
     if format == "json":
         output = (json.dumps(out, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    elif format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["state", "track", "cadence_days", "grace_days", "last_done_utc",
+                         "next_due_utc", "days", "completions", "snoozed_until"])
+        for row in report["tracks"]:
+            writer.writerow([row["state"], _safe_csv(row["title"]), row["cadence_days"], row["grace_days"],
+                             row["last_done_utc"] or "", row["next_due_utc"] or "",
+                             "" if row["days"] is None else row["days"], row["completions"],
+                             row["snoozed_until"] or ""])
+        output = buf.getvalue().encode("utf-8")
     else:
         def esc(v):
             return html.escape(str(v), quote=True)
