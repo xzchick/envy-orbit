@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     exp = commands.add_parser("export", help="write a plaintext HTML or JSON status report")
     exp.add_argument("orbit")
     exp.add_argument("destination", help="a new report file; never overwritten")
-    exp.add_argument("--format", default="html", choices=("html", "json"))
+    exp.add_argument("--format", default="html", choices=("html", "json", "csv"))
     exp.add_argument("--lookahead", type=int, default=DEFAULT_LOOKAHEAD, metavar="DAYS")
 
     ic = commands.add_parser("ical", help="write each track's next due date to an iCal (.ics) file")
