@@ -27,7 +27,7 @@ AES-256-GCM encrypted orbits, a SHA-256 hash-chained completion journal, revisio
 </p>
 
 <p align="center">
-  <img src="assets/readme/window.png" width="90%" alt="The Orbit window: a status board of recurring tracks coloured by state — overdue, due, never logged, soon and on track — in the ENVY neon theme" />
+  <img src="assets/readme/demo.gif" width="90%" alt="The Orbit window: a status board of recurring tracks coloured by state — overdue, due, never logged, soon and on track — in the ENVY neon theme" />
 </p>
 
 <p align="center"><sub>A real native window — not a browser view. The wordmark pulses, a satellite circles its orbit, and a light travels the accent bar.</sub></p>
