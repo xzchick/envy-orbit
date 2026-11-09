@@ -314,5 +314,27 @@ class OrbitTest(unittest.TestCase):
         self.assertEqual(rows[1][2], "30")
 
 
+    # ----- completion history (v0.2) -----------------------------------
+    def test_history_newest_first_and_track_filter(self):
+        p0 = self.orbit()
+        p1 = self._seq(); t1 = core.add_track(p0, p1, self.SECRET, "Rotate", 30)["track_id"]
+        p2 = self._seq(); t2 = core.add_track(p1, p2, self.SECRET, "Backup", 7)["track_id"]
+        p3 = self._seq(); core.log(p2, p3, self.SECRET, t1, done_utc=when(self.base, 0), note="first")
+        p4 = self._seq(); core.log(p3, p4, self.SECRET, t2, done_utc=when(self.base, 1))
+        p5 = self._seq(); core.log(p4, p5, self.SECRET, t1, done_utc=when(self.base, 30), note="second")
+        h = core.history(p5, self.SECRET)
+        self.assertEqual(h["count"], 3)
+        self.assertEqual(h["completions"][0]["track"], "Rotate")      # newest first
+        self.assertEqual(h["completions"][0]["note"], "second")
+        hf = core.history(p5, self.SECRET, track_id=t2)
+        self.assertEqual(hf["count"], 1)
+        self.assertEqual(hf["completions"][0]["track"], "Backup")
+
+    def test_history_rejects_unknown_track(self):
+        p0 = self.orbit()
+        with self.assertRaises(OrbitError):
+            core.history(p0, self.SECRET, track_id="11111111-1111-1111-1111-111111111111")
+
+
 if __name__ == "__main__":
     unittest.main()

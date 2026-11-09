@@ -424,6 +424,28 @@ def inspect(source, secret):
                        "happened, and a logged completion is a self-report."}
 
 
+def history(source, secret, track_id=None):
+    """The completion log, newest first, with each entry's track title. With
+    ``track_id``, only that track's completions. Read-only."""
+    data, _ = _load(source, secret)
+    titles = {t["id"]: t["title"] for t in data["tracks"]}
+    if track_id is not None:
+        track_id = _uuid(track_id, "track id")
+        if track_id not in titles and not any(r["track_id"] == track_id for r in data["journal"]):
+            raise OrbitError("No such track in this orbit")
+    rows = []
+    for record in data["journal"]:
+        if track_id is not None and record["track_id"] != track_id:
+            continue
+        rows.append({"recorded_utc": record["recorded_utc"], "track_id": record["track_id"],
+                     "track": titles.get(record["track_id"], "(removed track)"),
+                     "done_utc": record["done_utc"], "note": record["note"]})
+    rows.reverse()                                    # newest first
+    return {"orbit_id": data["orbit_id"], "title": data["title"], "count": len(rows), "completions": rows,
+            "basis": "Orbit records when you logged a completion, not that you did it. A logged completion is "
+                     "a self-report, and the chain orders entries, it does not prove when they happened."}
+
+
 # --- Plaintext export --------------------------------------------------------
 
 def _safe_csv(value):

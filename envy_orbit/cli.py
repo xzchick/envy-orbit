@@ -14,7 +14,7 @@ import sys
 
 from . import __version__
 from .core import (DEFAULT_LOOKAHEAD, OrbitError, add_track, check_passphrase, create,
-                   export, inspect, log, remove_track, snooze, status, write_ical)
+                   export, history, inspect, log, remove_track, snooze, status, write_ical)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     insp = commands.add_parser("inspect", help="print the decrypted orbit and journal (read-only)")
     insp.add_argument("orbit")
+
+    hist = commands.add_parser("history", help="list logged completions, newest first (read-only)")
+    hist.add_argument("orbit")
+    hist.add_argument("--track", default=None, help="only this track's completions")
 
     exp = commands.add_parser("export", help="write a plaintext HTML or JSON status report")
     exp.add_argument("orbit")
@@ -135,6 +139,15 @@ def _run(args) -> int:
         return 0
     if args.command == "inspect":
         print(json.dumps(inspect(args.orbit, _passphrase()), indent=2, ensure_ascii=False))
+        return 0
+    if args.command == "history":
+        result = history(args.orbit, _passphrase(), args.track)
+        if not result["completions"]:
+            print("No completions logged yet.")
+        for row in result["completions"]:
+            note = f"  — {row['note']}" if row["note"] else ""
+            print(f"  {row['done_utc']}  {row['track']}  (logged {row['recorded_utc']}){note}")
+        print(f"{result['count']} completion(s)")
         return 0
     return 0
 
