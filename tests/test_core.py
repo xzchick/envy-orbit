@@ -37,6 +37,37 @@ class OrbitTest(unittest.TestCase):
         self._n = getattr(self, "_n", 0) + 1
         return self.dir / f"o.r{self._n}.envyorbit"
 
+    def _track_with_logs(self, cadence, grace, offsets):
+        p = self.orbit()
+        p1 = self._seq()
+        tid = core.add_track(p, p1, self.SECRET, "T", cadence, grace_days=grace)["track_id"]
+        p = p1
+        for off in offsets:
+            d = self._seq()
+            core.log(p, d, self.SECRET, tid, done_utc=when(self.base, off))
+            p = d
+        return p, tid
+
+    def test_streaks_and_drift(self):
+        # cadence 7, grace 0; intervals 7,7,16,7 -> on-time T,T,F,T.
+        p, _ = self._track_with_logs(7, 0, [0, 7, 14, 30, 37])
+        t = core.streaks(p, self.SECRET)["tracks"][0]
+        self.assertEqual(t["completions"], 5)
+        self.assertEqual(t["intervals"], 4)
+        self.assertEqual(t["current_streak"], 1)       # trailing on-time run (after the late one)
+        self.assertEqual(t["longest_streak"], 2)       # the first two intervals
+        self.assertEqual(t["on_time_rate_pct"], 75.0)  # 3 of 4
+        self.assertAlmostEqual(t["mean_drift_days"], 2.25, places=2)  # (0+0+9+0)/4
+        self.assertAlmostEqual(t["last_interval_days"], 7.0, places=2)
+
+    def test_streaks_needs_two_completions(self):
+        p, _ = self._track_with_logs(7, 0, [0])
+        t = core.streaks(p, self.SECRET)["tracks"][0]
+        self.assertEqual(t["intervals"], 0)
+        self.assertEqual(t["current_streak"], 0)
+        self.assertIsNone(t["on_time_rate_pct"])
+        self.assertIsNone(t["mean_drift_days"])
+
     # ----- envelope / create -------------------------------------------
     def test_encrypted_round_trip_and_magic(self):
         blob = core.encrypt_bytes(b"x", self.SECRET)

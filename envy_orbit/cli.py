@@ -14,7 +14,8 @@ import sys
 
 from . import __version__
 from .core import (DEFAULT_LOOKAHEAD, OrbitError, add_track, check_passphrase, create,
-                   export, history, inspect, log, remove_track, snooze, status, write_ical)
+                   export, history, inspect, log, remove_track, snooze, status, streaks,
+                   write_ical)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     hist = commands.add_parser("history", help="list logged completions, newest first (read-only)")
     hist.add_argument("orbit")
     hist.add_argument("--track", default=None, help="only this track's completions")
+
+    stk = commands.add_parser("streaks", help="per-track on-time streaks and drift (read-only)")
+    stk.add_argument("orbit")
+    stk.add_argument("--json", action="store_true", help="emit the full stats as JSON")
 
     exp = commands.add_parser("export", help="write a plaintext HTML or JSON status report")
     exp.add_argument("orbit")
@@ -148,6 +153,23 @@ def _run(args) -> int:
             note = f"  — {row['note']}" if row["note"] else ""
             print(f"  {row['done_utc']}  {row['track']}  (logged {row['recorded_utc']}){note}")
         print(f"{result['count']} completion(s)")
+        return 0
+    if args.command == "streaks":
+        result = streaks(args.orbit, _passphrase())
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if not result["tracks"]:
+            print("No tracks yet.")
+        for t in result["tracks"]:
+            if t["intervals"] == 0:
+                print(f"  {t['title']}: {t['completions']} completion(s) — need two to measure a streak")
+                continue
+            drift = t["mean_drift_days"]
+            tendency = "on cadence" if abs(drift) < 0.05 else (f"{drift:+.2f}d/interval "
+                       f"({'late' if drift > 0 else 'early'})")
+            print(f"  {t['title']}: streak {t['current_streak']} (best {t['longest_streak']}) · "
+                  f"{t['on_time_rate_pct']}% on time · drift {tendency}")
         return 0
     return 0
 
