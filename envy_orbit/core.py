@@ -412,6 +412,55 @@ def status(source, secret, now=None, lookahead=DEFAULT_LOOKAHEAD):
                      "reminder, not an enforcement, and times are assertions from your clock."}
 
 
+def streaks(source, secret):
+    """Per-track cadence stats from the completion log. Read-only.
+
+    For each track with at least two completions, measures the intervals between
+    consecutive completions and reports:
+
+    - **current_streak** / **longest_streak** — runs of *on-time* completions, where a
+      completion is on time if it landed within the cadence plus grace of the one before
+      it (being early counts as on time).
+    - **on_time_rate_pct** — share of intervals that were on time.
+    - **mean_drift_days** — the average of (actual interval − cadence); positive means you
+      tend to run late, negative means early.
+
+    A logged completion is a self-report, and times are assertions from your clock.
+    """
+    data, _ = _load(source, secret)
+    rows = []
+    for track in data["tracks"]:
+        cadence, grace = track["cadence_days"], track["grace_days"]
+        done = sorted(_parse_utc(r["done_utc"]) for r in data["journal"]
+                      if r["track_id"] == track["id"])
+        intervals = [(done[i] - done[i - 1]).total_seconds() / 86400.0 for i in range(1, len(done))]
+        on_time = [iv <= cadence + grace for iv in intervals]
+        current = 0
+        for ok in reversed(on_time):
+            if not ok:
+                break
+            current += 1
+        longest = run = 0
+        for ok in on_time:
+            run = run + 1 if ok else 0
+            longest = max(longest, run)
+        rows.append({
+            "id": track["id"], "title": track["title"], "cadence_days": cadence,
+            "grace_days": grace, "completions": len(done), "intervals": len(intervals),
+            "current_streak": current, "longest_streak": longest,
+            "on_time_rate_pct": round(100.0 * sum(on_time) / len(on_time), 1) if on_time else None,
+            "mean_drift_days": round(sum(iv - cadence for iv in intervals) / len(intervals), 2)
+            if intervals else None,
+            "last_interval_days": round(intervals[-1], 2) if intervals else None})
+    rows.sort(key=lambda r: (-r["current_streak"], r["title"]))
+    return {"orbit_id": data["orbit_id"], "title": data["title"], "revision": data["revision"],
+            "tracks": rows,
+            "basis": "On time means a completion landed within the cadence plus grace of the one "
+                     "before it; being early counts as on time. Drift is the mean gap between your "
+                     "actual interval and the cadence — positive means you tend to run late. A "
+                     "completion is a self-report, and times are assertions from your clock."}
+
+
 def inspect(source, secret):
     data, envelope = _load(source, secret)
     return {"orbit_id": data["orbit_id"], "title": data["title"], "revision": data["revision"],
