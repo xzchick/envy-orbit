@@ -157,6 +157,10 @@ CI runs all of this on Ubuntu, Windows and macOS for every push. Regenerate the 
 
 Security policy and private vulnerability reporting: **[SECURITY.md](SECURITY.md)**. What ENVY Orbit does and does not protect against: **[THREAT_MODEL.md](THREAT_MODEL.md)**.
 
+## Roadmap
+
+Planned work for **v0.3** — signed releases, PyPI, desktop notifications and streak stats — is tracked in [#10](https://github.com/xzchick/envy-orbit/issues/10).
+
 ## The ENVY BLACK VEIL suite
 
 ENVY Orbit is one of eleven standalone apps from **ENVY BLACK VEIL** — small native desktop tools that are offline by design: no network, no accounts, no telemetry, everything encrypted at rest.
